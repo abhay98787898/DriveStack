@@ -68,6 +68,14 @@ export async function DELETE(
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
 
+    const rate = checkRateLimit(session.user.id, 'asset-delete', 30, 60_000);
+    if (!rate.allowed) {
+      return NextResponse.json(rateLimitResponse(rate.retryAfterSeconds), {
+        status: 429,
+        headers: { 'Retry-After': String(rate.retryAfterSeconds) },
+      });
+    }
+
     const { id } = await params;
     const asset = await db.asset.findFirst({
       where: { id, account: { is: { ownerUserId: session.user.id } } },
@@ -80,25 +88,18 @@ export async function DELETE(
       );
     }
 
-    // Delete from Google Drive
-    try {
-      await deleteFileFromDrive(asset.accountId, asset.googleFileId);
-    } catch {
-      // Continue deleting from DB even if remote file was already manually removed
-    }
+    // Keep the database record if Google Drive deletion fails, so the owner
+    // can retry instead of silently losing track of a still-stored file.
+    await deleteFileFromDrive(asset.accountId, asset.googleFileId);
 
-    // Delete from DB
-    await db.asset.delete({
-      where: { id: asset.id },
+    // Remove metadata and decrement the usage counter atomically.
+    await db.$transaction(async (tx) => {
+      await tx.asset.delete({ where: { id: asset.id } });
+      await tx.googleAccount.update({
+        where: { id: asset.accountId },
+        data: { storageUsed: { decrement: BigInt(asset.sizeBytes) } },
+      });
     });
-
-    // Update storage usage
-    await db.googleAccount.update({
-      where: { id: asset.accountId },
-      data: {
-        storageUsed: { decrement: BigInt(asset.sizeBytes) },
-      },
-    }).catch(() => {});
 
     return NextResponse.json({
       success: true,

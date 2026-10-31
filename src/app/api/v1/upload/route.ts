@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Readable } from 'stream';
 import { inspectImageUpload, sanitizeImageName, ImageUploadError, MAX_IMAGE_SIZE_BYTES } from '@/lib/image-upload';
 import { validateApiKey, isDomainAllowed } from '@/lib/api-key';
-import { uploadStreamToDrive } from '@/lib/gdrive';
+import { uploadStreamToDrive, deleteFileFromDrive } from '@/lib/gdrive';
 import { db } from '@/lib/db';
 import { getPublicAppUrl } from '@/lib/public-url';
 import { checkRateLimit, rateLimitResponse } from '@/lib/rate-limit';
@@ -36,6 +36,8 @@ function getApiKeyFromHeaders(headers: Headers): string | null {
 }
 
 export async function POST(request: NextRequest) {
+  let uploadedFileId: string | null = null;
+  let uploadedAccountId: string | null = null;
   try {
     const rawKey = getApiKeyFromHeaders(request.headers);
     if (!rawKey) {
@@ -103,7 +105,11 @@ export async function POST(request: NextRequest) {
       folder
     );
 
-    const asset = await db.asset.create({
+    uploadedFileId = uploadResult.fileId;
+    uploadedAccountId = keyRecord.accountId;
+
+    const asset = await db.$transaction(async (tx) => {
+      const createdAsset = await tx.asset.create({
       data: {
         accountId: keyRecord.accountId,
         createdByKeyId: keyRecord.id,
@@ -114,14 +120,17 @@ export async function POST(request: NextRequest) {
         width,
         height,
       },
+      });
+      await tx.googleAccount.update({
+        where: { id: keyRecord.accountId },
+        data: { storageUsed: { increment: BigInt(sizeBytes) } },
+      });
+      return createdAsset;
     });
 
-    await db.googleAccount.update({
-      where: { id: keyRecord.accountId },
-      data: {
-        storageUsed: { increment: BigInt(sizeBytes) },
-      },
-    });
+    // DB record and storage accounting are committed together.
+    uploadedFileId = null;
+    uploadedAccountId = null;
 
     const appUrl = getPublicAppUrl();
     const publicUrl = `${appUrl}/media/${asset.id}`;
@@ -139,6 +148,13 @@ export async function POST(request: NextRequest) {
       { status: 201, headers: CORS_HEADERS }
     );
   } catch (error: unknown) {
+    if (uploadedFileId && uploadedAccountId) {
+      try {
+        await deleteFileFromDrive(uploadedAccountId, uploadedFileId);
+      } catch {
+        // Preserve the original failure response; orphan cleanup can be retried by audit.
+      }
+    }
     const status = error instanceof ImageUploadError ? error.status : 500;
     return NextResponse.json(
       { success: false, error: error instanceof Error ? error.message : 'Internal Server Error' },

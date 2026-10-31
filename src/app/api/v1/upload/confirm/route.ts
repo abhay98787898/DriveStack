@@ -126,33 +126,27 @@ export async function POST(request: NextRequest) {
       throw new ImageUploadError('Uploaded image format does not match the declared MIME type', 415);
     }
 
-    const updateResult = await db.asset.updateMany({
-      where: {
-        id: asset.id,
-        accountId: keyRecord.accountId,
-        createdByKeyId: keyRecord.id,
-        googleFileId: { startsWith: 'pending_' },
-      },
-      data: {
-        googleFileId: google_file_id,
-      },
-    });
+    const updated = await db.$transaction(async (tx) => {
+      const updateResult = await tx.asset.updateMany({
+        where: {
+          id: asset.id,
+          accountId: keyRecord.accountId,
+          createdByKeyId: keyRecord.id,
+          googleFileId: { startsWith: 'pending_' },
+        },
+        data: { googleFileId: google_file_id },
+      });
 
-    if (updateResult.count !== 1) {
-      return NextResponse.json(
-        { success: false, error: 'Upload confirmation has already been processed or is not permitted' },
-        { status: 409 }
-      );
-    }
+      if (updateResult.count !== 1) {
+        throw new Error('UPLOAD_CONFIRM_CONFLICT');
+      }
 
-    const updated = await db.asset.findUniqueOrThrow({ where: { id: asset.id } });
+      await tx.googleAccount.update({
+        where: { id: keyRecord.accountId },
+        data: { storageUsed: { increment: BigInt(asset.sizeBytes) } },
+      });
 
-    // Update storage usage only after the asset has been confirmed.
-    await db.googleAccount.update({
-      where: { id: keyRecord.accountId },
-      data: {
-        storageUsed: { increment: BigInt(asset.sizeBytes) },
-      },
+      return tx.asset.findUniqueOrThrow({ where: { id: asset.id } });
     });
 
     const appUrl = getPublicAppUrl();
@@ -167,9 +161,15 @@ export async function POST(request: NextRequest) {
       url: mediaUrl,
     });
   } catch (error: unknown) {
-    const status = error instanceof ImageUploadError ? error.status : 500;
+    const status = error instanceof ImageUploadError
+      ? error.status
+      : error instanceof Error && error.message === 'UPLOAD_CONFIRM_CONFLICT'
+        ? 409
+        : 500;
     return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : 'Failed to confirm upload' },
+      { success: false, error: error instanceof Error
+        ? (error.message === 'UPLOAD_CONFIRM_CONFLICT' ? 'Upload confirmation has already been processed or is not permitted' : error.message)
+        : 'Failed to confirm upload' },
       { status }
     );
   }
