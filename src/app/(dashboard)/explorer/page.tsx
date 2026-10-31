@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type SVGProps } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, Image as ImageIcon, Video, FileText, Copy, Trash2, ExternalLink, X, Sliders, AlertTriangle, Play } from 'lucide-react';
+import { Search, Image as ImageIcon, FileText, Copy, Trash2, ExternalLink, X, Sliders, Play } from 'lucide-react';
 
 interface Asset {
   id: string;
@@ -48,7 +48,27 @@ export default function ExplorerPage() {
   };
 
   useEffect(() => {
-    fetchAssets();
+    let isActive = true;
+    const params = new URLSearchParams({ limit: '60' });
+
+    if (search) params.set('search', search);
+    if (typeFilter) params.set('type', typeFilter);
+
+    fetch(`/api/v1/assets?${params.toString()}`, { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((data: { success?: boolean; data?: Asset[] }) => {
+        if (isActive && data.success && Array.isArray(data.data)) {
+          setAssets(data.data);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (isActive) setLoading(false);
+      });
+
+    return () => {
+      isActive = false;
+    };
   }, [search, typeFilter]);
 
   const executeDelete = async (id: string) => {
@@ -414,7 +434,7 @@ export default function ExplorerPage() {
   );
 }
 
-function Check(props: any) {
+function Check(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
       {...props}

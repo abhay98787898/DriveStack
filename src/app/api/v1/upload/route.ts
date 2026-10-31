@@ -139,9 +139,9 @@ export async function POST(request: NextRequest) {
       },
       { status: 201, headers: CORS_HEADERS }
     );
-  } catch (error: any) {
+  } catch (error: unknown) {
     return NextResponse.json(
-      { success: false, error: error.message || 'Internal Server Error' },
+      { success: false, error: error instanceof Error ? error.message : 'Internal Server Error' },
       { status: 500, headers: CORS_HEADERS }
     );
   }

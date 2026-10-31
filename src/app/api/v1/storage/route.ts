@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { getOwnerSession } from '@/lib/auth-guard';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,9 +12,17 @@ function formatBytes(bytes: number) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const account = await db.googleAccount.findFirst();
+    const session = await getOwnerSession(request.headers);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const account = await db.googleAccount.findFirst({
+      where: { ownerUserId: session.user.id },
+      orderBy: { createdAt: 'asc' },
+    });
 
     if (!account) {
       return NextResponse.json({
@@ -47,9 +56,9 @@ export async function GET() {
       percentage: Math.min(100, percentage),
       percentage_label: percentageLabel,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     return NextResponse.json(
-      { error: error.message || 'Failed to fetch storage info' },
+      { error: error instanceof Error ? error.message : 'Failed to fetch storage info' },
       { status: 500 }
     );
   }

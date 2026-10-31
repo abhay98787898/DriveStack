@@ -1,21 +1,65 @@
+import { timingSafeEqual } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { handleOAuthCallback } from '@/lib/gdrive';
+import { getOwnerSession } from '@/lib/auth-guard';
+
+const OAUTH_STATE_COOKIE = 'drive_oauth_state';
+
+function redirectAndClearState(appUrl: string, query: string) {
+  const response = NextResponse.redirect(`${appUrl}?${query}`);
+  response.cookies.set(OAUTH_STATE_COOKIE, '', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/api/auth/google/callback',
+    maxAge: 0,
+  });
+  return response;
+}
+
+function stateMatches(expected: string | undefined, received: string | null): boolean {
+  if (!expected || !received) return false;
+  const expectedBuffer = Buffer.from(expected);
+  const receivedBuffer = Buffer.from(received);
+  return (
+    expectedBuffer.length === receivedBuffer.length &&
+    timingSafeEqual(expectedBuffer, receivedBuffer)
+  );
+}
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const code = searchParams.get('code');
   const error = searchParams.get('error');
-
+  const returnedState = searchParams.get('state');
+  const savedState = request.cookies.get(OAUTH_STATE_COOKIE)?.value;
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+  const session = await getOwnerSession(request.headers);
 
-  if (error || !code) {
-    return NextResponse.redirect(`${appUrl}?error=${encodeURIComponent(error || 'missing_code')}`);
+  if (!session) {
+    return redirectAndClearState(appUrl, 'error=owner_login_required');
+  }
+
+  if (error) {
+    return redirectAndClearState(appUrl, `error=${encodeURIComponent(error)}`);
+  }
+
+  if (!code) {
+    return redirectAndClearState(appUrl, 'error=missing_code');
+  }
+
+  if (!stateMatches(savedState, returnedState)) {
+    return redirectAndClearState(appUrl, 'error=invalid_oauth_state');
   }
 
   try {
-    await handleOAuthCallback(code);
-    return NextResponse.redirect(`${appUrl}?auth=success`);
-  } catch (err: any) {
-    return NextResponse.redirect(`${appUrl}?error=${encodeURIComponent(err.message || 'auth_failed')}`);
+    await handleOAuthCallback(code, session.user.id);
+    return redirectAndClearState(appUrl, 'auth=success');
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'auth_failed';
+    return redirectAndClearState(
+      appUrl,
+      `error=${encodeURIComponent(message)}`
+    );
   }
 }

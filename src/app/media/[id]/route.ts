@@ -8,11 +8,12 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const asset = await db.asset.findUnique({
-      where: { id: params.id },
+      where: { id },
     });
 
     if (!asset) {
@@ -113,7 +114,7 @@ export async function GET(
       status: 200,
       headers: responseHeaders,
     });
-  } catch (error: any) {
-    return new NextResponse(error.message || 'Error delivering media', { status: 500 });
+  } catch (error: unknown) {
+    return new NextResponse(error instanceof Error ? error.message : 'Error delivering media', { status: 500 });
   }
 }

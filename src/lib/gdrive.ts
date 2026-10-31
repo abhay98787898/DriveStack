@@ -17,16 +17,17 @@ export function getOAuth2Client() {
   );
 }
 
-export function getAuthUrl(): string {
+export function getAuthUrl(state: string): string {
   const oauth2Client = getOAuth2Client();
   return oauth2Client.generateAuthUrl({
     access_type: 'offline',
-    prompt: 'consent',
+    prompt: 'consent select_account',
+    state,
     scope: SCOPES,
   });
 }
 
-export async function handleOAuthCallback(code: string) {
+export async function handleOAuthCallback(code: string, ownerUserId: string) {
   const oauth2Client = getOAuth2Client();
   const { tokens } = await oauth2Client.getToken(code);
   oauth2Client.setCredentials(tokens);
@@ -74,9 +75,15 @@ export async function handleOAuthCallback(code: string) {
 
   const encryptedRefreshToken = encrypt(tokens.refresh_token);
 
+  const existingAccount = await db.googleAccount.findUnique({ where: { email } });
+  if (existingAccount?.ownerUserId && existingAccount.ownerUserId !== ownerUserId) {
+    throw new Error('This Google Drive account is already linked to another owner.');
+  }
+
   const account = await db.googleAccount.upsert({
     where: { email },
     create: {
+      ownerUserId,
       email,
       refreshToken: encryptedRefreshToken,
       rootFolderId,
@@ -84,6 +91,7 @@ export async function handleOAuthCallback(code: string) {
       storageLimit,
     },
     update: {
+      ownerUserId,
       refreshToken: encryptedRefreshToken,
       rootFolderId,
       storageUsed,
@@ -266,22 +274,75 @@ export async function createResumableUploadSession(
     },
   });
 
+  const uploadUrl = response.headers.get('location');
+  if (!uploadUrl) {
+    throw new Error('Google Drive did not return a resumable upload URL.');
+  }
+
   return {
-    uploadUrl: response.headers.location as string,
+    uploadUrl,
     targetParentId,
     accountId: account.id,
   };
 }
 
-export async function setFilePublicPermission(accountId: string, fileId: string) {
-  const { drive } = await getDriveClient(accountId);
-  try {
-    await drive.permissions.create({
-      fileId,
-      requestBody: {
-        role: 'reader',
-        type: 'anyone',
-      },
-    });
-  } catch {}
+export async function setFilePublicPermission(
+  accountId: string,
+  fileId: string,
+  expectedSizeBytes: number,
+  expectedMimeType: string
+) {
+  const { drive, account } = await getDriveClient(accountId);
+
+  // Confirm that the uploaded file belongs to this DriveStack account's media folder.
+  const fileResponse = await drive.files.get({
+    fileId,
+    fields: 'id,mimeType,size,parents,trashed',
+  });
+  const file = fileResponse.data;
+
+  if (file.trashed) {
+    throw new Error('The uploaded Google Drive file is in the trash');
+  }
+
+  const parentIds = file.parents || [];
+  let belongsToAccountFolder = parentIds.includes(account.rootFolderId);
+
+  // Uploads may be placed one level below the account's root media folder.
+  if (!belongsToAccountFolder) {
+    for (const parentId of parentIds) {
+      const parentResponse = await drive.files.get({
+        fileId: parentId,
+        fields: 'id,mimeType,parents,trashed',
+      });
+      const parent = parentResponse.data;
+      if (
+        !parent.trashed &&
+        parent.mimeType === 'application/vnd.google-apps.folder' &&
+        (parent.parents || []).includes(account.rootFolderId)
+      ) {
+        belongsToAccountFolder = true;
+        break;
+      }
+    }
+  }
+
+  if (!belongsToAccountFolder) {
+    throw new Error("The Google Drive file is outside this account's DriveStack folder");
+  }
+
+  const actualSize = Number(file.size || 0);
+  if (actualSize !== expectedSizeBytes || file.mimeType !== expectedMimeType) {
+    throw new Error('Uploaded file metadata does not match the upload session');
+  }
+
+  // Do not swallow permission errors: the API must not report a public URL
+  // unless Google confirms that the permission was created.
+  await drive.permissions.create({
+    fileId,
+    requestBody: {
+      role: 'reader',
+      type: 'anyone',
+    },
+  });
 }

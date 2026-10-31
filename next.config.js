@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  serverExternalPackages: ['sharp'],
   experimental: {
-    serverComponentsExternalPackages: ['sharp'],
     serverActions: {
       bodySizeLimit: '500mb',
     },

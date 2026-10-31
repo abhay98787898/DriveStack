@@ -9,30 +9,34 @@
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
     "postinstall": "prisma generate",
-    "lint": "next lint"
+    "lint": "eslint ."
   },
   "dependencies": {
+    "@better-auth/prisma-adapter": "^1.7.14",
     "@prisma/client": "^5.21.1",
+    "better-auth": "^1.7.14",
     "busboy": "^1.6.0",
     "clsx": "^2.1.1",
-    "googleapis": "^144.0.0",
+    "googleapis": "^178.0.0",
     "lucide-react": "^0.453.0",
     "nanoid": "^5.0.7",
-    "next": "^14.2.15",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "sharp": "^0.33.5",
+    "next": "^16.4.3",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "sharp": "^0.35.5",
     "tailwind-merge": "^2.5.4"
   },
   "devDependencies": {
     "@types/busboy": "^1.5.4",
     "@types/node": "^20.17.0",
-    "@types/react": "^18.3.11",
-    "@types/react-dom": "^18.3.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.47",
     "prisma": "^5.21.1",
     "tailwindcss": "^3.4.14",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "eslint": "^9.0.0",
+    "eslint-config-next": "^16.4.3"
   }
 }

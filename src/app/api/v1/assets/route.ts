@@ -1,17 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
+import type { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
+import { getOwnerSession } from '@/lib/auth-guard';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
+    const session = await getOwnerSession(request.headers);
+    if (!session) {
+      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    }
+
     const { searchParams } = new URL(request.url);
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
     const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '50', 10)));
     const search = searchParams.get('search');
     const mimePrefix = searchParams.get('type');
 
-    const where: any = {};
+    const where: Prisma.AssetWhereInput = { account: { is: { ownerUserId: session.user.id } } };
 
     if (search) {
       where.name = { contains: search };
@@ -66,9 +73,9 @@ export async function GET(request: NextRequest) {
         },
       }
     );
-  } catch (error: any) {
+  } catch (error: unknown) {
     return NextResponse.json(
-      { success: false, error: error.message || 'Internal Server Error' },
+      { success: false, error: error instanceof Error ? error.message : 'Internal Server Error' },
       { status: 500 }
     );
   }

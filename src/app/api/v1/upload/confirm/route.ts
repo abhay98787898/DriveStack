@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { validateApiKey } from '@/lib/api-key';
+import { validateApiKey, isDomainAllowed } from '@/lib/api-key';
 import { setFilePublicPermission } from '@/lib/gdrive';
 import { db } from '@/lib/db';
 
@@ -36,48 +36,88 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const origin = request.headers.get('origin') || request.headers.get('referer');
+    if (!isDomainAllowed(keyRecord.allowedDomains, origin)) {
+      return NextResponse.json(
+        { success: false, error: 'Forbidden: Request origin is not permitted by API key domain policy' },
+        { status: 403 }
+      );
+    }
+
     const body = await request.json();
     const { asset_id, google_file_id } = body;
 
-    if (!asset_id || !google_file_id) {
+    if (
+      typeof asset_id !== 'string' ||
+      typeof google_file_id !== 'string' ||
+      !asset_id.trim() ||
+      !google_file_id.trim() ||
+      google_file_id.length > 256 ||
+      google_file_id.startsWith('pending_')
+    ) {
       return NextResponse.json(
-        { success: false, error: 'Bad Request: "asset_id" and "google_file_id" are required' },
+        { success: false, error: 'Bad Request: valid "asset_id" and "google_file_id" are required' },
         { status: 400 }
       );
     }
 
-    const asset = await db.asset.findUnique({
-      where: { id: asset_id },
+    // A key may only confirm a pending upload created by that same key
+    // and stored under the Google account attached to that key.
+    const asset = await db.asset.findFirst({
+      where: {
+        id: asset_id,
+        accountId: keyRecord.accountId,
+        createdByKeyId: keyRecord.id,
+        googleFileId: { startsWith: 'pending_' },
+      },
     });
 
     if (!asset) {
       return NextResponse.json(
-        { success: false, error: 'Asset not found' },
+        { success: false, error: 'Pending upload not found for this API key' },
         { status: 404 }
       );
     }
 
-    const directUrl = `https://lh3.googleusercontent.com/d/${google_file_id}`;
+    // Verify the uploaded file is in this account's DriveStack folder and
+    // make it public before recording a successful confirmation.
+    await setFilePublicPermission(
+      keyRecord.accountId,
+      google_file_id,
+      asset.sizeBytes,
+      asset.mimeType
+    );
 
-    // Update asset with confirmed Google file ID
-    const updated = await db.asset.update({
-      where: { id: asset_id },
+    const directUrl = `https://lh3.googleusercontent.com/d/${google_file_id}`;
+    const updateResult = await db.asset.updateMany({
+      where: {
+        id: asset.id,
+        accountId: keyRecord.accountId,
+        createdByKeyId: keyRecord.id,
+        googleFileId: { startsWith: 'pending_' },
+      },
       data: {
         googleFileId: google_file_id,
         directUrl,
       },
     });
 
-    // Update storage quota usage
+    if (updateResult.count !== 1) {
+      return NextResponse.json(
+        { success: false, error: 'Upload confirmation has already been processed or is not permitted' },
+        { status: 409 }
+      );
+    }
+
+    const updated = await db.asset.findUniqueOrThrow({ where: { id: asset.id } });
+
+    // Update storage usage only after the asset has been confirmed.
     await db.googleAccount.update({
       where: { id: keyRecord.accountId },
       data: {
         storageUsed: { increment: BigInt(asset.sizeBytes) },
       },
-    }).catch(() => {});
-
-    // Set permission in Google Drive so direct links work
-    setFilePublicPermission(keyRecord.accountId, google_file_id).catch(() => {});
+    });
 
     const host = request.headers.get('host') || 'localhost:3000';
     const protocol = request.headers.get('x-forwarded-proto') || 'http';
@@ -92,9 +132,9 @@ export async function POST(request: NextRequest) {
       url: mediaUrl,
       direct_url: updated.directUrl,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     return NextResponse.json(
-      { success: false, error: error.message || 'Failed to confirm upload' },
+      { success: false, error: error instanceof Error ? error.message : 'Failed to confirm upload' },
       { status: 500 }
     );
   }

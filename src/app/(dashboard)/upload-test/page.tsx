@@ -11,6 +11,19 @@ interface KeyOption {
   fullKey?: string | null;
 }
 
+interface KeyListResponse {
+  success: boolean;
+  data?: KeyOption[];
+}
+
+interface UploadResult {
+  success: boolean;
+  name?: string;
+  mime_type?: string;
+  url?: string;
+  error?: string;
+}
+
 export default function UploadTestPage() {
   const router = useRouter();
   const [keys, setKeys] = useState<KeyOption[]>([]);
@@ -19,26 +32,32 @@ export default function UploadTestPage() {
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<UploadResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    let isActive = true;
+
     fetch('/api/v1/keys', { cache: 'no-store' })
-      .then((res) => res.json())
+      .then((res) => res.json() as Promise<KeyListResponse>)
       .then((data) => {
-        if (data.success && data.data.length > 0) {
-          setKeys(data.data);
-          // Pre-select first key with fullKey if available and not yet set
-          const firstValid = data.data.find((k: KeyOption) => k.fullKey);
-          if (firstValid && !apiKey) {
-            setApiKey(firstValid.fullKey);
-          }
+        if (!isActive || !data.success || !Array.isArray(data.data)) return;
+
+        setKeys(data.data);
+        // Pre-select the first usable key without reading stale state.
+        const firstValid = data.data.find((key) => Boolean(key.fullKey));
+        if (firstValid?.fullKey) {
+          setApiKey((current) => current || firstValid.fullKey || '');
         }
       })
       .catch(() => {});
+
+    return () => {
+      isActive = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -105,7 +124,7 @@ export default function UploadTestPage() {
       xhr.onload = () => {
         setUploading(false);
         try {
-          const data = JSON.parse(xhr.responseText);
+          const data = JSON.parse(xhr.responseText) as UploadResult;
           if (xhr.status >= 200 && xhr.status < 300 && data.success) {
             setProgress(100);
             setResult(data);
@@ -124,9 +143,13 @@ export default function UploadTestPage() {
       };
 
       xhr.send(formData);
-    } catch (err: any) {
+    } catch (err: unknown) {
       setUploading(false);
-      setError(err.message || 'An unexpected error occurred during upload');
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'An unexpected error occurred during upload'
+      );
     }
   };
 

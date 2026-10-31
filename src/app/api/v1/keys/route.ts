@@ -2,12 +2,19 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { createApiKey } from '@/lib/api-key';
 import { decrypt } from '@/lib/encryption';
+import { getOwnerSession } from '@/lib/auth-guard';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const session = await getOwnerSession(request.headers);
+    if (!session) {
+      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    }
+
     const keys = await db.apiKey.findMany({
+      where: { account: { is: { ownerUserId: session.user.id } } },
       orderBy: { createdAt: 'desc' },
       select: {
         id: true,
@@ -49,9 +56,9 @@ export async function GET() {
         },
       }
     );
-  } catch (error: any) {
+  } catch (error: unknown) {
     return NextResponse.json(
-      { success: false, error: error.message || 'Internal Server Error' },
+      { success: false, error: error instanceof Error ? error.message : 'Internal Server Error' },
       { status: 500 }
     );
   }
@@ -59,6 +66,11 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
+    const session = await getOwnerSession(request.headers);
+    if (!session) {
+      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    }
+
     const body = await request.json();
     const { name, allowed_domains } = body;
 
@@ -70,7 +82,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Retrieve active Google account
-    const account = await db.googleAccount.findFirst();
+    const account = await db.googleAccount.findFirst({ where: { ownerUserId: session.user.id }, orderBy: { createdAt: 'asc' } });
     if (!account) {
       return NextResponse.json(
         { success: false, error: 'No Google account connected. Please connect Google Drive first.' },
@@ -87,9 +99,9 @@ export async function POST(request: NextRequest) {
       },
       { status: 201 }
     );
-  } catch (error: any) {
+  } catch (error: unknown) {
     return NextResponse.json(
-      { success: false, error: error.message || 'Internal Server Error' },
+      { success: false, error: error instanceof Error ? error.message : 'Internal Server Error' },
       { status: 500 }
     );
   }
@@ -97,6 +109,11 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
+    const session = await getOwnerSession(request.headers);
+    if (!session) {
+      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    }
+
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
 
@@ -107,17 +124,27 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    await db.apiKey.delete({
-      where: { id },
+    const deleted = await db.apiKey.deleteMany({
+      where: {
+        id,
+        account: { is: { ownerUserId: session.user.id } },
+      },
     });
+
+    if (deleted.count !== 1) {
+      return NextResponse.json(
+        { success: false, error: 'API key not found' },
+        { status: 404 }
+      );
+    }
 
     return NextResponse.json({
       success: true,
       message: 'API key revoked successfully',
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     return NextResponse.json(
-      { success: false, error: error.message || 'Internal Server Error' },
+      { success: false, error: error instanceof Error ? error.message : 'Internal Server Error' },
       { status: 500 }
     );
   }

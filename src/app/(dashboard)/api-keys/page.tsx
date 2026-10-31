@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Key, Plus, Trash2, Copy, Check, Terminal, Code, AlertTriangle, Eye, EyeOff, X } from 'lucide-react';
+import { Key, Plus, Trash2, Copy, Check, AlertTriangle, Eye, EyeOff, X } from 'lucide-react';
 
 interface ApiKeyItem {
   id: string;
@@ -43,7 +43,23 @@ export default function ApiKeysPage() {
   };
 
   useEffect(() => {
-    fetchKeys();
+    let isActive = true;
+
+    fetch('/api/v1/keys', { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((data: { success?: boolean; data?: ApiKeyItem[] }) => {
+        if (isActive && data.success && Array.isArray(data.data)) {
+          setKeys(data.data);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (isActive) setLoading(false);
+      });
+
+    return () => {
+      isActive = false;
+    };
   }, []);
 
   const handleCreateKey = async (e: React.FormEvent) => {

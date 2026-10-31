@@ -87,9 +87,9 @@ export async function POST(request: NextRequest) {
       upload_url: session.uploadUrl,
       media_url: mediaUrl,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     return NextResponse.json(
-      { success: false, error: error.message || 'Failed to initialize direct upload session' },
+      { success: false, error: error instanceof Error ? error.message : 'Failed to initialize direct upload session' },
       { status: 500 }
     );
   }

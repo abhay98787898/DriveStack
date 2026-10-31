@@ -1,14 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { deleteFileFromDrive } from '@/lib/gdrive';
+import { getOwnerSession } from '@/lib/auth-guard';
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const asset = await db.asset.findUnique({
-      where: { id: params.id },
+    const session = await getOwnerSession(request.headers);
+    if (!session) {
+      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const { id } = await params;
+    const asset = await db.asset.findFirst({
+      where: { id, account: { is: { ownerUserId: session.user.id } } },
     });
 
     if (!asset) {
@@ -35,21 +42,27 @@ export async function GET(
         created_at: asset.createdAt.toISOString(),
       },
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     return NextResponse.json(
-      { success: false, error: error.message || 'Internal Server Error' },
+      { success: false, error: error instanceof Error ? error.message : 'Internal Server Error' },
       { status: 500 }
     );
   }
 }
 
 export async function DELETE(
-  _request: NextRequest,
-  { params }: { params: { id: string } }
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const asset = await db.asset.findUnique({
-      where: { id: params.id },
+    const session = await getOwnerSession(request.headers);
+    if (!session) {
+      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const { id } = await params;
+    const asset = await db.asset.findFirst({
+      where: { id, account: { is: { ownerUserId: session.user.id } } },
     });
 
     if (!asset) {
@@ -83,9 +96,9 @@ export async function DELETE(
       success: true,
       message: 'Asset deleted successfully',
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     return NextResponse.json(
-      { success: false, error: error.message || 'Internal Server Error' },
+      { success: false, error: error instanceof Error ? error.message : 'Internal Server Error' },
       { status: 500 }
     );
   }

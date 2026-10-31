@@ -1,6 +1,9 @@
 import Link from 'next/link';
+import { headers } from 'next/headers';
+import { redirect } from 'next/navigation';
 import { db } from '@/lib/db';
-import { HardDrive, CheckCircle2, AlertCircle, ArrowUpRight, Copy, Image as ImageIcon } from 'lucide-react';
+import { getOwnerSession } from '@/lib/auth-guard';
+import { CheckCircle2, AlertCircle, ArrowUpRight, Image as ImageIcon } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,10 +16,20 @@ function formatBytes(bytes: number) {
 }
 
 export default async function OverviewPage() {
-  const account = await db.googleAccount.findFirst();
+  const session = await getOwnerSession(await headers());
+  if (!session) redirect('/login');
+
+  const accounts = await db.googleAccount.findMany({
+    where: { ownerUserId: session.user.id },
+    orderBy: { createdAt: 'asc' },
+  });
+  const account = accounts[0] ?? null;
+  const accountIds = accounts.map((item) => item.id);
+
   const [totalAssets, recentAssets] = await Promise.all([
-    db.asset.count(),
+    db.asset.count({ where: { accountId: { in: accountIds } } }),
     db.asset.findMany({
+      where: { accountId: { in: accountIds } },
       take: 6,
       orderBy: { createdAt: 'desc' },
     }),
@@ -73,19 +86,23 @@ export default async function OverviewPage() {
 
           <div className="mt-3 sm:mt-6 pt-2.5 sm:pt-4 border-t border-surface-border">
             {account ? (
-              <a
-                href="/api/auth/google"
-                className="text-[11px] sm:text-xs font-medium text-slate-400 hover:text-slate-200 transition-colors inline-flex items-center gap-1"
-              >
-                Reconnect tokens <ArrowUpRight className="w-3 h-3" />
-              </a>
+              <form action="/api/auth/google" method="get">
+                <button
+                  type="submit"
+                  className="text-[11px] sm:text-xs font-medium text-slate-400 hover:text-slate-200 transition-colors inline-flex items-center gap-1"
+                >
+                  Reconnect tokens <ArrowUpRight className="w-3 h-3" />
+                </button>
+              </form>
             ) : (
-              <a
-                href="/api/auth/google"
-                className="w-full h-8 sm:h-10 px-3 rounded-md bg-primary hover:bg-primary-hover text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
-              >
-                Connect Google Drive
-              </a>
+              <form action="/api/auth/google" method="get">
+                <button
+                  type="submit"
+                  className="w-full h-8 sm:h-10 px-3 rounded-md bg-primary hover:bg-primary-hover text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                >
+                  Connect Google Drive
+                </button>
+              </form>
             )}
           </div>
         </div>
