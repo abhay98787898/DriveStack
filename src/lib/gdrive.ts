@@ -172,38 +172,109 @@ export async function uploadStreamToDrive(
 
   const fileId = res.data.id!;
 
-  // Set file permission to readable by anyone with the link for direct CDN compatibility
-  try {
-    await drive.permissions.create({
-      fileId,
-      requestBody: {
-        role: 'reader',
-        type: 'anyone',
-      },
-    });
-  } catch {
-    // Non-critical if organization policy restricts public links; proxy will handle delivery
-  }
-
-  const directUrl = `https://lh3.googleusercontent.com/d/${fileId}`;
-
   return {
     fileId,
     name: res.data.name || filename,
     mimeType: res.data.mimeType || mimeType,
     size: Number(res.data.size || 0),
-    directUrl,
   };
 }
 
-export async function downloadStreamFromDrive(accountId: string, fileId: string) {
+export async function downloadStreamFromDrive(
+  accountId: string,
+  fileId: string,
+  range?: string
+) {
   const { drive } = await getDriveClient(accountId);
   const response = await drive.files.get(
     { fileId, alt: 'media' },
-    { responseType: 'stream' }
+    {
+      responseType: 'stream',
+      ...(range ? { headers: { Range: range } } : {}),
+    }
   );
-  return response.data as Readable;
+
+  const headers = response.headers as Record<string, string | string[] | undefined>;
+  return {
+    stream: response.data as Readable,
+    status: response.status,
+    contentRange: typeof headers['content-range'] === 'string' ? headers['content-range'] : undefined,
+    contentLength: typeof headers['content-length'] === 'string' ? headers['content-length'] : undefined,
+    acceptRanges: typeof headers['accept-ranges'] === 'string' ? headers['accept-ranges'] : undefined,
+  };
 }
+
+/** List image files in the DriveStack media root and its direct subfolders. */
+export async function listImagesInMediaFolder(accountId: string) {
+  const { drive, account } = await getDriveClient(accountId);
+  const folders: Array<{ id: string; name: string }> = [];
+  const images: Array<{ id: string; name: string; mimeType: string }> = [];
+
+  async function listChildren(parentId: string) {
+    let pageToken: string | undefined;
+    do {
+      const response = await drive.files.list({
+        q: `'${parentId}' in parents and trashed = false`,
+        pageSize: 1000,
+        pageToken,
+        orderBy: 'name',
+        fields: 'nextPageToken,files(id,name,mimeType,trashed)',
+        spaces: 'drive',
+      });
+      for (const file of response.data.files || []) {
+        if (!file.id || !file.mimeType) continue;
+        if (file.mimeType === 'application/vnd.google-apps.folder') {
+          if (parentId === account.rootFolderId) folders.push({ id: file.id, name: file.name || 'Folder' });
+        } else if (file.mimeType.startsWith('image/')) {
+          images.push({ id: file.id, name: file.name || 'Unnamed image', mimeType: file.mimeType });
+        }
+      }
+      pageToken = response.data.nextPageToken || undefined;
+    } while (pageToken);
+  }
+
+  await listChildren(account.rootFolderId);
+  for (const folder of folders) await listChildren(folder.id);
+  return images;
+}
+
+/** List public-link permissions only after verifying the file is inside the media folder. */
+export async function listAnyonePermissionsForAsset(accountId: string, fileId: string) {
+  const { drive, account } = await getDriveClient(accountId);
+  const fileResponse = await drive.files.get({ fileId, fields: 'id,parents,trashed' });
+  const file = fileResponse.data;
+  if (file.trashed) throw new Error('File is in the Google Drive trash');
+
+  const parents = file.parents || [];
+  let isInMediaFolder = parents.includes(account.rootFolderId);
+  if (!isInMediaFolder) {
+    for (const parentId of parents) {
+      const parent = await drive.files.get({ fileId: parentId, fields: 'id,parents,mimeType,trashed' });
+      if (!parent.data.trashed && parent.data.mimeType === 'application/vnd.google-apps.folder' &&
+          (parent.data.parents || []).includes(account.rootFolderId)) {
+        isInMediaFolder = true;
+        break;
+      }
+    }
+  }
+  if (!isInMediaFolder) throw new Error('File is outside this account media folder; permission change blocked');
+
+  const permissionsResponse = await drive.permissions.list({ fileId, fields: 'permissions(id,type,role)' });
+  return (permissionsResponse.data.permissions || []).filter(
+    (permission) => permission.type === 'anyone' && permission.id
+  );
+}
+
+/** Remove only public-link permissions from a file verified inside the media folder. */
+export async function revokeAnyonePermissionFromAsset(accountId: string, fileId: string) {
+  const { drive } = await getDriveClient(accountId);
+  const publicPermissions = await listAnyonePermissionsForAsset(accountId, fileId);
+  for (const permission of publicPermissions) {
+    await drive.permissions.delete({ fileId, permissionId: permission.id! });
+  }
+  return publicPermissions.length;
+}
+
 
 export async function deleteFileFromDrive(accountId: string, fileId: string) {
   const { drive } = await getDriveClient(accountId);
@@ -286,7 +357,7 @@ export async function createResumableUploadSession(
   };
 }
 
-export async function setFilePublicPermission(
+export async function verifyUploadedFile(
   accountId: string,
   fileId: string,
   expectedSizeBytes: number,
@@ -336,13 +407,6 @@ export async function setFilePublicPermission(
     throw new Error('Uploaded file metadata does not match the upload session');
   }
 
-  // Do not swallow permission errors: the API must not report a public URL
-  // unless Google confirms that the permission was created.
-  await drive.permissions.create({
-    fileId,
-    requestBody: {
-      role: 'reader',
-      type: 'anyone',
-    },
-  });
+  // The file remains private in Google Drive. DriveStack serves it through
+  // the authenticated Google Drive API using its branded /media/{id} route.
 }

@@ -12,7 +12,6 @@ interface Asset {
   width: number | null;
   height: number | null;
   url: string;
-  direct_url: string | null;
   created_at: string;
 }
 

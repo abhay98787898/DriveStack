@@ -2,13 +2,12 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Key, Plus, Trash2, Copy, Check, AlertTriangle, Eye, EyeOff, X } from 'lucide-react';
+import { Key, Plus, Trash2, Copy, Check, AlertTriangle, X } from 'lucide-react';
 
 interface ApiKeyItem {
   id: string;
   name: string;
   keyPrefix: string;
-  fullKey?: string | null;
   allowedDomains: string | null;
   lastUsedAt: string | null;
   createdAt: string;
@@ -26,8 +25,6 @@ export default function ApiKeysPage() {
   const [copiedSecret, setCopiedSecret] = useState(false);
   const [keyToRevoke, setKeyToRevoke] = useState<ApiKeyItem | null>(null);
   const [selectedTab, setSelectedTab] = useState<'curl' | 'js' | 'python'>('curl');
-  const [revealedKeys, setRevealedKeys] = useState<Record<string, boolean>>({});
-  const [copiedRowKeyId, setCopiedRowKeyId] = useState<string | null>(null);
 
   const fetchKeys = async () => {
     try {
@@ -86,7 +83,6 @@ export default function ApiKeysPage() {
           id: data.data.id,
           name: data.data.name,
           keyPrefix: data.data.keyPrefix,
-          fullKey: data.data.key,
           allowedDomains: domains.trim() || null,
           lastUsedAt: null,
           createdAt: typeof data.data.createdAt === 'string' ? data.data.createdAt : new Date().toISOString(),
@@ -132,16 +128,6 @@ export default function ApiKeysPage() {
     setTimeout(() => setCopiedSecret(false), 2000);
   };
 
-  const toggleReveal = (id: string) => {
-    setRevealedKeys((prev) => ({ ...prev, [id]: !prev[id] }));
-  };
-
-  const copyRowKey = (text: string, id: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedRowKeyId(id);
-    setTimeout(() => setCopiedRowKeyId(null), 2000);
-  };
-
   return (
     <div className="p-3 sm:p-6 md:p-8 max-w-7xl mx-auto space-y-3 sm:space-y-6 animate-fade-in">
       {/* Header */}
@@ -184,7 +170,7 @@ export default function ApiKeysPage() {
             </div>
 
             <p className="text-[11px] sm:text-xs text-slate-400 leading-relaxed">
-              Your API key is active. Copy it now, or you can reveal and manage it anytime in the Active API Keys table below.
+              This is the only time the full API key will be shown. Copy it now and store it somewhere safe. You cannot retrieve it later.
             </p>
 
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
@@ -247,45 +233,7 @@ export default function ApiKeysPage() {
                   <tr key={k.id} className="hover:bg-surface-hover/50 transition-colors">
                     <td className="py-2.5 px-3 font-semibold text-slate-100">{k.name}</td>
                     <td className="py-2.5 px-3 font-mono text-[10px] sm:text-[11px] text-slate-300">
-                      <div className="flex items-center gap-1.5">
-                        <span className="truncate max-w-[130px] sm:max-w-[240px]">
-                          {k.fullKey
-                            ? revealedKeys[k.id]
-                              ? k.fullKey
-                              : `${k.fullKey.substring(0, 12)}••••••••`
-                            : k.keyPrefix}
-                        </span>
-                        {k.fullKey && (
-                          <button
-                            onClick={() => toggleReveal(k.id)}
-                            className="p-1 rounded text-slate-400 hover:text-slate-200 transition-colors"
-                            title={revealedKeys[k.id] ? 'Hide Key' : 'Reveal Key'}
-                          >
-                            {revealedKeys[k.id] ? (
-                              <EyeOff className="w-3 h-3" />
-                            ) : (
-                              <Eye className="w-3 h-3" />
-                            )}
-                          </button>
-                        )}
-                        <button
-                          onClick={() => copyRowKey(k.fullKey || k.keyPrefix, k.id)}
-                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-surface-hover hover:bg-slate-700 active:scale-95 text-slate-300 hover:text-white transition-all"
-                          title="Copy API Key"
-                        >
-                          {copiedRowKeyId === k.id ? (
-                            <>
-                              <Check className="w-2.5 h-2.5 text-emerald-400" />
-                              <span className="text-[9px] text-emerald-400 font-sans">Copied</span>
-                            </>
-                          ) : (
-                            <>
-                              <Copy className="w-2.5 h-2.5" />
-                              <span className="text-[9px] font-sans">Copy</span>
-                            </>
-                          )}
-                        </button>
-                      </div>
+                      <span className="truncate">{k.keyPrefix}</span>
                     </td>
                     <td className="py-2.5 px-3 text-slate-400">{k.allowedDomains || 'Any (*)'}</td>
                     <td className="py-2.5 px-3 text-slate-400">
@@ -356,7 +304,7 @@ async function uploadToDrive(file, apiKey) {
     body: JSON.stringify({ asset_id: session.asset_id, google_file_id: googleRes.id })
   }).then(r => r.json());
 
-  return confirmed.url; // Ready-to-use CDN URL
+  return confirmed.url; // Branded DriveStack media URL
 }`}</pre>
           )}
 

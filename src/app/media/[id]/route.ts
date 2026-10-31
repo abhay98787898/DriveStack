@@ -1,10 +1,44 @@
 import { NextRequest, NextResponse } from 'next/server';
 import sharp from 'sharp';
+import { Readable } from 'stream';
 import { db } from '@/lib/db';
 import { downloadStreamFromDrive } from '@/lib/gdrive';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+function parseByteRange(value: string, size: number): { start: number; end: number } | null {
+  if (!Number.isSafeInteger(size) || size <= 0) return null;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(value.trim());
+  if (!match || (!match[1] && !match[2])) return null;
+
+  let start: number;
+  let end: number;
+  if (!match[1]) {
+    const suffixLength = Number(match[2]);
+    if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0) return null;
+    start = Math.max(0, size - suffixLength);
+    end = size - 1;
+  } else {
+    start = Number(match[1]);
+    end = match[2] ? Number(match[2]) : size - 1;
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start >= size || end < start) return null;
+    end = Math.min(end, size - 1);
+  }
+
+  return { start, end };
+}
+
+function rangeNotSatisfiable(size: number) {
+  return new NextResponse(null, {
+    status: 416,
+    headers: {
+      'Content-Range': `bytes */${size}`,
+      'Accept-Ranges': 'bytes',
+      'Cache-Control': 'no-store',
+    },
+  });
+}
 
 export async function GET(
   request: NextRequest,
@@ -12,11 +46,9 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const asset = await db.asset.findUnique({
-      where: { id },
-    });
+    const asset = await db.asset.findUnique({ where: { id } });
 
-    if (!asset) {
+    if (!asset || asset.googleFileId.startsWith('pending_')) {
       return new NextResponse('Asset not found', { status: 404 });
     }
 
@@ -25,41 +57,45 @@ export async function GET(
     const heightParam = searchParams.get('h');
     const formatParam = searchParams.get('format')?.toLowerCase();
     const qualityParam = searchParams.get('q');
-
-    // Clamp resize parameters to protect against memory allocation DoS attacks
-    const rawWidth = widthParam ? parseInt(widthParam, 10) : undefined;
-    const rawHeight = heightParam ? parseInt(heightParam, 10) : undefined;
-    const width = rawWidth && !isNaN(rawWidth) ? Math.min(4000, Math.max(1, rawWidth)) : undefined;
-    const height = rawHeight && !isNaN(rawHeight) ? Math.min(4000, Math.max(1, rawHeight)) : undefined;
-    const quality = qualityParam ? Math.min(100, Math.max(1, parseInt(qualityParam, 10))) : 80;
-
-    const stream = await downloadStreamFromDrive(asset.accountId, asset.googleFileId);
-
-    // If it's an image and transformations are requested
+    const rawWidth = widthParam ? Number.parseInt(widthParam, 10) : undefined;
+    const rawHeight = heightParam ? Number.parseInt(heightParam, 10) : undefined;
+    const width = rawWidth && Number.isFinite(rawWidth) ? Math.min(4000, Math.max(1, rawWidth)) : undefined;
+    const height = rawHeight && Number.isFinite(rawHeight) ? Math.min(4000, Math.max(1, rawHeight)) : undefined;
+    const parsedQuality = qualityParam ? Number.parseInt(qualityParam, 10) : 80;
+    const quality = Number.isFinite(parsedQuality) ? Math.min(100, Math.max(1, parsedQuality)) : 80;
     const isImage = asset.mimeType.startsWith('image/');
-    const hasTransformations = width || height || formatParam;
+    const hasTransformations = Boolean(width || height || formatParam);
+    const rangeHeader = request.headers.get('range');
+
+    // Byte ranges apply to the original media representation, not transformed output.
+    if (rangeHeader && hasTransformations) {
+      return new NextResponse('Range requests are not supported with image transformations', { status: 400 });
+    }
+
+    let upstreamRange: string | undefined;
+    let expectedRange: { start: number; end: number } | null = null;
+    if (rangeHeader) {
+      expectedRange = parseByteRange(rangeHeader, Number(asset.sizeBytes));
+      if (!expectedRange) return rangeNotSatisfiable(Number(asset.sizeBytes));
+      upstreamRange = `bytes=${expectedRange.start}-${expectedRange.end}`;
+    }
+
+    const media = await downloadStreamFromDrive(asset.accountId, asset.googleFileId, upstreamRange);
+    const stream = media.stream;
 
     if (isImage && hasTransformations) {
-      // Buffer the incoming stream for Sharp processing
       const chunks: Buffer[] = [];
       for await (const chunk of stream) {
         chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
       }
       const inputBuffer = Buffer.concat(chunks);
-
       let transformer = sharp(inputBuffer);
 
       if (width || height) {
-        transformer = transformer.resize({
-          width,
-          height,
-          fit: 'inside',
-          withoutEnlargement: true,
-        });
+        transformer = transformer.resize({ width, height, fit: 'inside', withoutEnlargement: true });
       }
 
       let outputMimeType = asset.mimeType;
-
       if (formatParam === 'webp') {
         transformer = transformer.webp({ quality });
         outputMimeType = 'image/webp';
@@ -75,7 +111,6 @@ export async function GET(
       }
 
       const outputBuffer = await transformer.toBuffer();
-
       return new NextResponse(new Uint8Array(outputBuffer), {
         status: 200,
         headers: {
@@ -89,16 +124,7 @@ export async function GET(
       });
     }
 
-    // Direct streaming for videos, audio, documents, or untransformed images
-    const webStream = new ReadableStream({
-      start(controller) {
-        stream.on('data', (chunk) => controller.enqueue(chunk));
-        stream.on('end', () => controller.close());
-        stream.on('error', (err) => controller.error(err));
-      },
-    });
-
-    const responseHeaders: Record<string, string> = {
+    const headers: Record<string, string> = {
       'Content-Type': asset.mimeType,
       'Cache-Control': 'public, max-age=31536000, immutable',
       'Accept-Ranges': 'bytes',
@@ -106,14 +132,20 @@ export async function GET(
       'X-Content-Type-Options': 'nosniff',
       'Content-Security-Policy': "default-src 'none'; media-src 'self'; style-src 'unsafe-inline'; sandbox",
     };
-    if (asset.sizeBytes) {
-      responseHeaders['Content-Length'] = asset.sizeBytes.toString();
+
+    let status = 200;
+    if (expectedRange && media.status === 206) {
+      status = 206;
+      headers['Content-Range'] = media.contentRange ||
+        `bytes ${expectedRange.start}-${expectedRange.end}/${asset.sizeBytes}`;
+      headers['Content-Length'] = media.contentLength ||
+        String(expectedRange.end - expectedRange.start + 1);
+    } else if (asset.sizeBytes) {
+      headers['Content-Length'] = asset.sizeBytes.toString();
     }
 
-    return new NextResponse(webStream, {
-      status: 200,
-      headers: responseHeaders,
-    });
+    const webStream = Readable.toWeb(stream) as ReadableStream;
+    return new NextResponse(webStream, { status, headers });
   } catch (error: unknown) {
     return new NextResponse(error instanceof Error ? error.message : 'Error delivering media', { status: 500 });
   }

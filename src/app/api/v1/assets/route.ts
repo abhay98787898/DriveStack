@@ -55,7 +55,6 @@ export async function GET(request: NextRequest) {
       width: a.width,
       height: a.height,
       url: `${protocol}://${host}/media/${a.id}`,
-      direct_url: a.directUrl,
       created_at: a.createdAt.toISOString(),
     }));
 

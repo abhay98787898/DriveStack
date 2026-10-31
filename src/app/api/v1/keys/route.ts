@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { createApiKey } from '@/lib/api-key';
-import { decrypt } from '@/lib/encryption';
 import { getOwnerSession } from '@/lib/auth-guard';
 
 export const dynamic = 'force-dynamic';
@@ -20,30 +19,20 @@ export async function GET(request: NextRequest) {
         id: true,
         name: true,
         keyPrefix: true,
-        encryptedKey: true,
         allowedDomains: true,
         lastUsedAt: true,
         createdAt: true,
       },
     });
 
-    const formatted = keys.map((k) => {
-      let fullKey: string | null = null;
-      if (k.encryptedKey) {
-        try {
-          fullKey = decrypt(k.encryptedKey);
-        } catch {}
-      }
-      return {
-        id: k.id,
-        name: k.name,
-        keyPrefix: k.keyPrefix,
-        fullKey,
-        allowedDomains: k.allowedDomains,
-        lastUsedAt: k.lastUsedAt,
-        createdAt: k.createdAt,
-      };
-    });
+    const formatted = keys.map((k) => ({
+      id: k.id,
+      name: k.name,
+      keyPrefix: k.keyPrefix,
+      allowedDomains: k.allowedDomains,
+      lastUsedAt: k.lastUsedAt,
+      createdAt: k.createdAt,
+    }));
 
     return NextResponse.json(
       {
@@ -74,9 +63,17 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { name, allowed_domains } = body;
 
-    if (!name || typeof name !== 'string') {
+    if (typeof name !== 'string' || !name.trim() || name.trim().length > 80) {
       return NextResponse.json(
-        { success: false, error: 'Bad Request: "name" is required' },
+        { success: false, error: 'Bad Request: "name" must be between 1 and 80 characters' },
+        { status: 400 }
+      );
+    }
+
+    if (allowed_domains !== undefined && allowed_domains !== null &&
+        (typeof allowed_domains !== 'string' || allowed_domains.length > 2000)) {
+      return NextResponse.json(
+        { success: false, error: 'Bad Request: "allowed_domains" must be a string up to 2000 characters' },
         { status: 400 }
       );
     }
@@ -90,7 +87,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const createdKey = await createApiKey(account.id, name, allowed_domains);
+    const createdKey = await createApiKey(account.id, name.trim(), typeof allowed_domains === 'string' ? allowed_domains.trim() : undefined);
 
     return NextResponse.json(
       {

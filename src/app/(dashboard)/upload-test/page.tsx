@@ -1,20 +1,8 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { UploadCloud, CheckCircle2, AlertCircle, File, ExternalLink, ChevronDown, Key, Check } from 'lucide-react';
-
-interface KeyOption {
-  id: string;
-  name: string;
-  keyPrefix: string;
-  fullKey?: string | null;
-}
-
-interface KeyListResponse {
-  success: boolean;
-  data?: KeyOption[];
-}
+import { UploadCloud, CheckCircle2, AlertCircle, File, ExternalLink } from 'lucide-react';
 
 interface UploadResult {
   success: boolean;
@@ -26,7 +14,6 @@ interface UploadResult {
 
 export default function UploadTestPage() {
   const router = useRouter();
-  const [keys, setKeys] = useState<KeyOption[]>([]);
   const [apiKey, setApiKey] = useState('');
   const [folder, setFolder] = useState('uploads/test');
   const [file, setFile] = useState<File | null>(null);
@@ -34,41 +21,7 @@ export default function UploadTestPage() {
   const [progress, setProgress] = useState(0);
   const [result, setResult] = useState<UploadResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    let isActive = true;
-
-    fetch('/api/v1/keys', { cache: 'no-store' })
-      .then((res) => res.json() as Promise<KeyListResponse>)
-      .then((data) => {
-        if (!isActive || !data.success || !Array.isArray(data.data)) return;
-
-        setKeys(data.data);
-        // Pre-select the first usable key without reading stale state.
-        const firstValid = data.data.find((key) => Boolean(key.fullKey));
-        if (firstValid?.fullKey) {
-          setApiKey((current) => current || firstValid.fullKey || '');
-        }
-      })
-      .catch(() => {});
-
-    return () => {
-      isActive = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsDropdownOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -173,80 +126,9 @@ export default function UploadTestPage() {
             <label className="block text-[11px] sm:text-xs font-semibold text-slate-300 mb-1.5">
               API Key (Bearer Token)
             </label>
-
-            {keys.length > 0 && (
-              <div ref={dropdownRef} className="relative mb-2">
-                <button
-                  type="button"
-                  onClick={() => setIsDropdownOpen((prev) => !prev)}
-                  className="w-full bg-canvas border border-surface-border hover:border-slate-500 rounded-lg px-3 py-2 text-left flex items-center justify-between text-xs text-slate-200 focus:outline-none focus:border-primary transition-all shadow-sm"
-                >
-                  <div className="flex items-center gap-2 truncate">
-                    <Key className="w-3.5 h-3.5 text-primary shrink-0" />
-                    {(() => {
-                      const matched = keys.find((k) => k.fullKey && k.fullKey === apiKey.trim());
-                      if (matched) {
-                        return (
-                          <div className="flex items-center gap-2 truncate">
-                            <span className="font-semibold text-slate-100 truncate">{matched.name}</span>
-                            <span className="text-[10px] font-mono bg-surface px-1.5 py-0.5 rounded border border-surface-border text-slate-400">
-                              {matched.keyPrefix}
-                            </span>
-                          </div>
-                        );
-                      }
-                      if (apiKey) {
-                        return (
-                          <span className="font-mono text-slate-300 truncate">
-                            Custom Key ({apiKey.substring(0, 14)}...)
-                          </span>
-                        );
-                      }
-                      return <span className="text-slate-400">Select an active API key...</span>;
-                    })()}
-                  </div>
-                  <ChevronDown
-                    className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-200 ${
-                      isDropdownOpen ? 'rotate-180' : ''
-                    }`}
-                  />
-                </button>
-
-                {/* Custom Dropdown Popover */}
-                {isDropdownOpen && (
-                  <div className="absolute left-0 right-0 top-full mt-1.5 bg-surface border border-surface-border rounded-xl shadow-2xl p-1.5 z-30 space-y-1 animate-scale-in max-h-56 overflow-y-auto">
-                    <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                      Active API Keys
-                    </div>
-                    {keys.map((k) => {
-                      const isSelected = Boolean(k.fullKey && k.fullKey === apiKey.trim());
-                      return (
-                        <div
-                          key={k.id}
-                          onClick={() => {
-                            if (k.fullKey) {
-                              setApiKey(k.fullKey);
-                            }
-                            setIsDropdownOpen(false);
-                          }}
-                          className={`flex items-center justify-between px-2.5 py-2 rounded-lg cursor-pointer transition-all ${
-                            isSelected
-                              ? 'bg-primary/15 border border-primary/30 text-white'
-                              : 'hover:bg-surface-hover/80 text-slate-200'
-                          }`}
-                        >
-                          <div className="truncate pr-2">
-                            <p className="text-xs font-semibold truncate text-slate-100">{k.name}</p>
-                            <p className="text-[10px] font-mono text-slate-400 mt-0.5">{k.keyPrefix}</p>
-                          </div>
-                          {isSelected && <Check className="w-3.5 h-3.5 text-primary shrink-0" />}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
+            <p className="text-[10px] text-slate-500 mb-1.5">
+              Paste the API key you saved when it was created. For security, existing keys cannot be retrieved from this page.
+            </p>
 
             <input
               type="text"

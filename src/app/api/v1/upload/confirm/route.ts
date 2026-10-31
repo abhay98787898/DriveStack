@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { validateApiKey, isDomainAllowed } from '@/lib/api-key';
-import { setFilePublicPermission } from '@/lib/gdrive';
+import { verifyUploadedFile } from '@/lib/gdrive';
 import { db } from '@/lib/db';
 
 export const runtime = 'nodejs';
@@ -79,16 +79,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Verify the uploaded file is in this account's DriveStack folder and
-    // make it public before recording a successful confirmation.
-    await setFilePublicPermission(
+    // Verify the uploaded file belongs to this account's DriveStack folder.
+    // It remains private in Google Drive; delivery happens through /media/{id}.
+    await verifyUploadedFile(
       keyRecord.accountId,
       google_file_id,
       asset.sizeBytes,
       asset.mimeType
     );
 
-    const directUrl = `https://lh3.googleusercontent.com/d/${google_file_id}`;
     const updateResult = await db.asset.updateMany({
       where: {
         id: asset.id,
@@ -98,7 +97,6 @@ export async function POST(request: NextRequest) {
       },
       data: {
         googleFileId: google_file_id,
-        directUrl,
       },
     });
 
@@ -130,7 +128,6 @@ export async function POST(request: NextRequest) {
       size: updated.sizeBytes,
       mime_type: updated.mimeType,
       url: mediaUrl,
-      direct_url: updated.directUrl,
     });
   } catch (error: unknown) {
     return NextResponse.json(

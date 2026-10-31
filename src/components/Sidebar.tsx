@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { LayoutDashboard, Key, Image as ImageIcon, UploadCloud, HardDrive, Menu, X, LogOut } from 'lucide-react';
+import { LayoutDashboard, Key, Image as ImageIcon, UploadCloud, HardDrive, Menu, X, LogOut, ShieldCheck } from 'lucide-react';
 import clsx from 'clsx';
 import { authClient } from '@/lib/auth-client';
 
@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { href: '/api-keys', label: 'API Keys', icon: Key },
   { href: '/explorer', label: 'Media Explorer', icon: ImageIcon },
   { href: '/upload-test', label: 'Test Bench', icon: UploadCloud },
+  { href: '/drive-security', label: 'Drive Security', icon: ShieldCheck },
 ];
 
 interface StorageInfo {

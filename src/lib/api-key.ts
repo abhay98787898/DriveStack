@@ -1,6 +1,5 @@
 import crypto from 'crypto';
 import { db } from './db';
-import { encrypt } from './encryption';
 
 const KEY_PREFIX = 'drv_live_';
 
@@ -13,7 +12,6 @@ export async function createApiKey(accountId: string, name: string, allowedDomai
   const rawKey = `${KEY_PREFIX}${secretBytes}`;
   const keyHash = hashKey(rawKey);
   const keyPrefix = `${KEY_PREFIX}${secretBytes.substring(0, 6)}...`;
-  const encryptedKey = encrypt(rawKey);
 
   const record = await db.apiKey.create({
     data: {
@@ -21,7 +19,6 @@ export async function createApiKey(accountId: string, name: string, allowedDomai
       name,
       keyPrefix,
       keyHash,
-      encryptedKey,
       allowedDomains: allowedDomains || null,
     },
   });

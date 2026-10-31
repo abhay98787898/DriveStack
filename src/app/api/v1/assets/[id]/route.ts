@@ -38,7 +38,6 @@ export async function GET(
         width: asset.width,
         height: asset.height,
         url: `${protocol}://${host}/media/${asset.id}`,
-        direct_url: asset.directUrl,
         created_at: asset.createdAt.toISOString(),
       },
     });

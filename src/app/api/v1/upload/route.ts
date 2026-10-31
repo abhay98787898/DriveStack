@@ -111,7 +111,6 @@ export async function POST(request: NextRequest) {
         sizeBytes,
         width,
         height,
-        directUrl: uploadResult.directUrl,
       },
     });
 
@@ -134,7 +133,6 @@ export async function POST(request: NextRequest) {
         mime_type: asset.mimeType,
         size: asset.sizeBytes,
         url: publicUrl,
-        direct_url: asset.directUrl,
         created_at: asset.createdAt.toISOString(),
       },
       { status: 201, headers: CORS_HEADERS }
