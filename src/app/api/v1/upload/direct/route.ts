@@ -3,6 +3,7 @@ import { nanoid } from 'nanoid';
 import { validateApiKey, isDomainAllowed } from '@/lib/api-key';
 import { createResumableUploadSession } from '@/lib/gdrive';
 import { db } from '@/lib/db';
+import { isAllowedImageMimeType, MAX_IMAGE_SIZE_BYTES, sanitizeImageName } from '@/lib/image-upload';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -48,18 +49,25 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { name, mime_type, size, folder } = body;
 
-    if (!name || !mime_type || !size) {
+    if (typeof name !== 'string' || typeof mime_type !== 'string' || size === undefined || size === null) {
       return NextResponse.json(
         { success: false, error: 'Bad Request: "name", "mime_type", and "size" are required' },
         { status: 400 }
       );
     }
 
-    const sizeBytes = parseInt(size, 10);
+    const sizeBytes = Number(size);
+    if (!isAllowedImageMimeType(mime_type)) {
+      return NextResponse.json({ success: false, error: 'Unsupported image MIME type' }, { status: 415 });
+    }
+    if (!Number.isSafeInteger(sizeBytes) || sizeBytes <= 0 || sizeBytes > MAX_IMAGE_SIZE_BYTES) {
+      return NextResponse.json({ success: false, error: 'Image size must be between 1 byte and 25 MB' }, { status: 413 });
+    }
+    const safeName = sanitizeImageName(name);
     const session = await createResumableUploadSession(
       keyRecord.accountId,
-      name,
-      mime_type,
+      safeName,
+      mime_type.toLowerCase(),
       sizeBytes,
       folder,
       clientOrigin
@@ -70,16 +78,15 @@ export async function POST(request: NextRequest) {
       data: {
         accountId: keyRecord.accountId,
         createdByKeyId: keyRecord.id,
-        name,
+        name: safeName,
         googleFileId: `pending_${nanoid()}`,
-        mimeType: mime_type,
+        mimeType: mime_type.toLowerCase(),
         sizeBytes,
       },
     });
 
-    const host = request.headers.get('host') || 'localhost:3000';
-    const protocol = request.headers.get('x-forwarded-proto') || 'http';
-    const mediaUrl = `${protocol}://${host}/media/${asset.id}`;
+    const appUrl = (process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000').replace(/\/$/, '');
+    const mediaUrl = `${appUrl}/media/${asset.id}`;
 
     return NextResponse.json({
       success: true,

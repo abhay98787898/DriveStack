@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Readable } from 'stream';
-import sharp from 'sharp';
+import { inspectImageUpload, sanitizeImageName, ImageUploadError, MAX_IMAGE_SIZE_BYTES } from '@/lib/image-upload';
 import { validateApiKey, isDomainAllowed } from '@/lib/api-key';
 import { uploadStreamToDrive } from '@/lib/gdrive';
 import { db } from '@/lib/db';
@@ -59,6 +59,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const contentLength = Number(request.headers.get('content-length') || 0);
+    if (contentLength > MAX_IMAGE_SIZE_BYTES + 1024 * 1024) {
+      return NextResponse.json({ success: false, error: 'Request exceeds the 25 MB image upload limit' }, { status: 413, headers: CORS_HEADERS });
+    }
+
     const formData = await request.formData();
     const file = formData.get('file') as File | null;
     const folder = (formData.get('folder') as string | null) || undefined;
@@ -71,25 +76,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const filename = customName || file.name || 'unnamed_asset';
-    const mimeType = file.type || 'application/octet-stream';
-    const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+    const mimeType = (file.type || '').toLowerCase();
+    const filename = sanitizeImageName(customName || file.name || 'image');
+    const buffer = Buffer.from(await file.arrayBuffer());
     const sizeBytes = buffer.length;
-
-    let width: number | null = null;
-    let height: number | null = null;
-
-    // Extract image dimensions if it's an image
-    if (mimeType.startsWith('image/')) {
-      try {
-        const metadata = await sharp(buffer).metadata();
-        width = metadata.width || null;
-        height = metadata.height || null;
-      } catch {
-        // Fallback gracefully for unsupported or corrupt image formats
-      }
-    }
+    const metadata = await inspectImageUpload(buffer, mimeType);
+    const { width, height } = metadata;
 
     const stream = Readable.from(buffer);
 
@@ -121,9 +113,8 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    const host = request.headers.get('host') || 'localhost:3000';
-    const protocol = request.headers.get('x-forwarded-proto') || 'http';
-    const publicUrl = `${protocol}://${host}/media/${asset.id}`;
+    const appUrl = (process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000').replace(/\/$/, '');
+    const publicUrl = `${appUrl}/media/${asset.id}`;
 
     return NextResponse.json(
       {
@@ -138,9 +129,10 @@ export async function POST(request: NextRequest) {
       { status: 201, headers: CORS_HEADERS }
     );
   } catch (error: unknown) {
+    const status = error instanceof ImageUploadError ? error.status : 500;
     return NextResponse.json(
       { success: false, error: error instanceof Error ? error.message : 'Internal Server Error' },
-      { status: 500, headers: CORS_HEADERS }
+      { status, headers: CORS_HEADERS }
     );
   }
 }

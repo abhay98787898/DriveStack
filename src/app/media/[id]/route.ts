@@ -65,6 +65,12 @@ export async function GET(
     const quality = Number.isFinite(parsedQuality) ? Math.min(100, Math.max(1, parsedQuality)) : 80;
     const isImage = asset.mimeType.startsWith('image/');
     const hasTransformations = Boolean(width || height || formatParam);
+    if (hasTransformations && !isImage) {
+      return new NextResponse('Image transformations are only available for image assets', { status: 415 });
+    }
+    if (formatParam && !['webp', 'jpeg', 'jpg', 'png', 'avif'].includes(formatParam)) {
+      return new NextResponse('Unsupported image output format', { status: 400 });
+    }
     const rangeHeader = request.headers.get('range');
 
     // Byte ranges apply to the original media representation, not transformed output.
@@ -116,7 +122,7 @@ export async function GET(
         headers: {
           'Content-Type': outputMimeType,
           'Content-Length': outputBuffer.length.toString(),
-          'Cache-Control': 'public, max-age=31536000, immutable',
+          'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800',
           'Access-Control-Allow-Origin': '*',
           'X-Content-Type-Options': 'nosniff',
           'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox",
@@ -126,7 +132,7 @@ export async function GET(
 
     const headers: Record<string, string> = {
       'Content-Type': asset.mimeType,
-      'Cache-Control': 'public, max-age=31536000, immutable',
+      'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800',
       'Accept-Ranges': 'bytes',
       'Access-Control-Allow-Origin': '*',
       'X-Content-Type-Options': 'nosniff',

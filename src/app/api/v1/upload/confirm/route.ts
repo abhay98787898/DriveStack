@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { validateApiKey, isDomainAllowed } from '@/lib/api-key';
 import { verifyUploadedFile } from '@/lib/gdrive';
 import { db } from '@/lib/db';
+import { isAllowedImageMimeType } from '@/lib/image-upload';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -79,6 +80,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (!isAllowedImageMimeType(asset.mimeType)) {
+      return NextResponse.json({ success: false, error: 'Pending upload is not an allowed image type' }, { status: 415 });
+    }
+
     // Verify the uploaded file belongs to this account's DriveStack folder.
     // It remains private in Google Drive; delivery happens through /media/{id}.
     await verifyUploadedFile(
@@ -117,9 +122,8 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    const host = request.headers.get('host') || 'localhost:3000';
-    const protocol = request.headers.get('x-forwarded-proto') || 'http';
-    const mediaUrl = `${protocol}://${host}/media/${updated.id}`;
+    const appUrl = (process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000').replace(/\/$/, '');
+    const mediaUrl = `${appUrl}/media/${updated.id}`;
 
     return NextResponse.json({
       success: true,
