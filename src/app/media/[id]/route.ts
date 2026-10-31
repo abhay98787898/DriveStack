@@ -153,6 +153,6 @@ export async function GET(
     const webStream = Readable.toWeb(stream) as ReadableStream;
     return new NextResponse(webStream, { status, headers });
   } catch (error: unknown) {
-    return new NextResponse(error instanceof Error ? error.message : 'Error delivering media', { status: 500 });
+    return new NextResponse('Unable to deliver media', { status: 500, headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
   }
 }

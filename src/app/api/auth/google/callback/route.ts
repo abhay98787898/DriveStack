@@ -2,6 +2,7 @@ import { timingSafeEqual } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { handleOAuthCallback } from '@/lib/gdrive';
 import { getOwnerSession } from '@/lib/auth-guard';
+import { getPublicAppUrl } from '@/lib/public-url';
 
 const OAUTH_STATE_COOKIE = 'drive_oauth_state';
 
@@ -33,7 +34,7 @@ export async function GET(request: NextRequest) {
   const error = searchParams.get('error');
   const returnedState = searchParams.get('state');
   const savedState = request.cookies.get(OAUTH_STATE_COOKIE)?.value;
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+  const appUrl = getPublicAppUrl();
   const session = await getOwnerSession(request.headers);
 
   if (!session) {
@@ -41,7 +42,7 @@ export async function GET(request: NextRequest) {
   }
 
   if (error) {
-    return redirectAndClearState(appUrl, `error=${encodeURIComponent(error)}`);
+    return redirectAndClearState(appUrl, 'error=google_authorization_denied');
   }
 
   if (!code) {
@@ -55,11 +56,9 @@ export async function GET(request: NextRequest) {
   try {
     await handleOAuthCallback(code, session.user.id);
     return redirectAndClearState(appUrl, 'auth=success');
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'auth_failed';
-    return redirectAndClearState(
-      appUrl,
-      `error=${encodeURIComponent(message)}`
-    );
+  } catch {
+    // Provider and database errors can contain internal details; expose only
+    // a stable status code in the browser redirect.
+    return redirectAndClearState(appUrl, 'error=drive_connection_failed');
   }
 }
