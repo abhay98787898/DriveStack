@@ -4,6 +4,7 @@ import { validateApiKey, isDomainAllowed } from '@/lib/api-key';
 import { createResumableUploadSession } from '@/lib/gdrive';
 import { db } from '@/lib/db';
 import { isAllowedImageMimeType, MAX_IMAGE_SIZE_BYTES, sanitizeImageName } from '@/lib/image-upload';
+import { getPublicAppUrl } from '@/lib/public-url';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -85,7 +86,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    const appUrl = (process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000').replace(/\/$/, '');
+    const appUrl = getPublicAppUrl();
     const mediaUrl = `${appUrl}/media/${asset.id}`;
 
     return NextResponse.json({

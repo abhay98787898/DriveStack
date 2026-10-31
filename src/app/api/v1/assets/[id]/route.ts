@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { deleteFileFromDrive } from '@/lib/gdrive';
 import { getOwnerSession } from '@/lib/auth-guard';
+import { getPublicAppUrl } from '@/lib/public-url';
 
 export async function GET(
   request: NextRequest,
@@ -25,8 +26,7 @@ export async function GET(
       );
     }
 
-    const host = request.headers.get('host') || 'localhost:3000';
-    const protocol = request.headers.get('x-forwarded-proto') || 'http';
+    const appUrl = getPublicAppUrl();
 
     return NextResponse.json({
       success: true,
@@ -37,7 +37,7 @@ export async function GET(
         size_bytes: asset.sizeBytes,
         width: asset.width,
         height: asset.height,
-        url: `${protocol}://${host}/media/${asset.id}`,
+        url: `${appUrl}/media/${asset.id}`,
         created_at: asset.createdAt.toISOString(),
       },
     });

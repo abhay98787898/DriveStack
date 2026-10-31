@@ -4,6 +4,7 @@ import { inspectImageUpload, sanitizeImageName, ImageUploadError, MAX_IMAGE_SIZE
 import { validateApiKey, isDomainAllowed } from '@/lib/api-key';
 import { uploadStreamToDrive } from '@/lib/gdrive';
 import { db } from '@/lib/db';
+import { getPublicAppUrl } from '@/lib/public-url';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -113,7 +114,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    const appUrl = (process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000').replace(/\/$/, '');
+    const appUrl = getPublicAppUrl();
     const publicUrl = `${appUrl}/media/${asset.id}`;
 
     return NextResponse.json(

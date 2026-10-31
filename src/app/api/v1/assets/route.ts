@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import type { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { getOwnerSession } from '@/lib/auth-guard';
+import { getPublicAppUrl } from '@/lib/public-url';
 
 export const dynamic = 'force-dynamic';
 
@@ -44,9 +45,7 @@ export async function GET(request: NextRequest) {
       }),
     ]);
 
-    const host = request.headers.get('host') || 'localhost:3000';
-    const protocol = request.headers.get('x-forwarded-proto') || 'http';
-
+    const appUrl = getPublicAppUrl();
     const assets = items.map((a) => ({
       id: a.id,
       name: a.name,
@@ -54,7 +53,7 @@ export async function GET(request: NextRequest) {
       size_bytes: a.sizeBytes,
       width: a.width,
       height: a.height,
-      url: `${protocol}://${host}/media/${a.id}`,
+      url: `${appUrl}/media/${a.id}`,
       created_at: a.createdAt.toISOString(),
     }));
 

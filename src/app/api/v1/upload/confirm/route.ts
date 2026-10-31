@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { validateApiKey, isDomainAllowed } from '@/lib/api-key';
-import { verifyUploadedFile } from '@/lib/gdrive';
+import { verifyUploadedFile, downloadStreamFromDrive } from '@/lib/gdrive';
 import { db } from '@/lib/db';
-import { isAllowedImageMimeType } from '@/lib/image-upload';
+import { inspectImageUpload, isAllowedImageMimeType, ImageUploadError } from '@/lib/image-upload';
+import { getPublicAppUrl } from '@/lib/public-url';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -93,6 +94,29 @@ export async function POST(request: NextRequest) {
       asset.mimeType
     );
 
+    // Resumable uploads bypass the application server while transferring bytes.
+    // Inspect the stored bytes at confirmation time so MIME headers cannot spoof
+    // an executable or malformed file as an image.
+    const uploadedMedia = await downloadStreamFromDrive(keyRecord.accountId, google_file_id);
+    const chunks: Buffer[] = [];
+    let receivedBytes = 0;
+    for await (const chunk of uploadedMedia.stream) {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      receivedBytes += buffer.length;
+      if (receivedBytes > asset.sizeBytes || receivedBytes > 25 * 1024 * 1024) {
+        uploadedMedia.stream.destroy();
+        throw new ImageUploadError('Uploaded image exceeds the permitted size', 413);
+      }
+      chunks.push(buffer);
+    }
+    if (receivedBytes !== asset.sizeBytes) {
+      throw new ImageUploadError('Uploaded image size does not match the upload session', 400);
+    }
+    const inspected = await inspectImageUpload(Buffer.concat(chunks), asset.mimeType);
+    if (inspected.mimeType !== asset.mimeType) {
+      throw new ImageUploadError('Uploaded image format does not match the declared MIME type', 415);
+    }
+
     const updateResult = await db.asset.updateMany({
       where: {
         id: asset.id,
@@ -122,7 +146,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    const appUrl = (process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000').replace(/\/$/, '');
+    const appUrl = getPublicAppUrl();
     const mediaUrl = `${appUrl}/media/${updated.id}`;
 
     return NextResponse.json({
@@ -134,9 +158,10 @@ export async function POST(request: NextRequest) {
       url: mediaUrl,
     });
   } catch (error: unknown) {
+    const status = error instanceof ImageUploadError ? error.status : 500;
     return NextResponse.json(
       { success: false, error: error instanceof Error ? error.message : 'Failed to confirm upload' },
-      { status: 500 }
+      { status }
     );
   }
 }
