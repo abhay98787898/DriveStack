@@ -80,9 +80,9 @@ export async function GET(request: NextRequest) {
         },
       }
     );
-  } catch (error: unknown) {
+  } catch {
     return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : 'Internal Server Error' },
+      { success: false, error: 'Internal Server Error' },
       { status: 500 }
     );
   }

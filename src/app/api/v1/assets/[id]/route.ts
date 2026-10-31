@@ -50,9 +50,9 @@ export async function GET(
         created_at: asset.createdAt.toISOString(),
       },
     });
-  } catch (error: unknown) {
+  } catch {
     return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : 'Internal Server Error' },
+      { success: false, error: 'Internal Server Error' },
       { status: 500 }
     );
   }
@@ -105,9 +105,9 @@ export async function DELETE(
       success: true,
       message: 'Asset deleted successfully',
     });
-  } catch (error: unknown) {
+  } catch {
     return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : 'Internal Server Error' },
+      { success: false, error: 'Internal Server Error' },
       { status: 500 }
     );
   }

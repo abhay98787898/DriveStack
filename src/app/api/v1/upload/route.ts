@@ -157,7 +157,7 @@ export async function POST(request: NextRequest) {
     }
     const status = error instanceof ImageUploadError ? error.status : 500;
     return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : 'Internal Server Error' },
+      { success: false, error: error instanceof ImageUploadError ? error.message : 'Upload failed due to a server error' },
       { status, headers: CORS_HEADERS }
     );
   }

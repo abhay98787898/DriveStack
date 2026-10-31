@@ -24,13 +24,9 @@ export async function GET(request: NextRequest) {
     });
 
     return response;
-  } catch (error: unknown) {
+  } catch {
     return NextResponse.json(
-      {
-        error: error instanceof Error
-          ? error.message
-          : 'Failed to generate OAuth URL',
-      },
+      { error: 'Unable to start Google Drive connection. Check server configuration and try again.' },
       { status: 500 }
     );
   }

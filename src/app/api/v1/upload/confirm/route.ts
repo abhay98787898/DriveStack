@@ -166,10 +166,13 @@ export async function POST(request: NextRequest) {
       : error instanceof Error && error.message === 'UPLOAD_CONFIRM_CONFLICT'
         ? 409
         : 500;
+    const publicError = error instanceof ImageUploadError
+      ? error.message
+      : error instanceof Error && error.message === 'UPLOAD_CONFIRM_CONFLICT'
+        ? 'Upload confirmation has already been processed or is not permitted'
+        : 'Failed to confirm upload';
     return NextResponse.json(
-      { success: false, error: error instanceof Error
-        ? (error.message === 'UPLOAD_CONFIRM_CONFLICT' ? 'Upload confirmation has already been processed or is not permitted' : error.message)
-        : 'Failed to confirm upload' },
+      { success: false, error: publicError },
       { status }
     );
   }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getOwnerSession } from '@/lib/auth-guard';
+import { checkRateLimit, rateLimitResponse } from '@/lib/rate-limit';
 import { listAnyonePermissionsForAsset, listImagesInMediaFolder, revokeAnyonePermissionFromAsset } from '@/lib/gdrive';
 
 export const dynamic = 'force-dynamic';
@@ -11,6 +12,14 @@ export async function POST(request: NextRequest) {
     const session = await getOwnerSession(request.headers);
     if (!session) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const rate = checkRateLimit(session.user.id, 'drive-permissions-audit', 10, 60_000);
+    if (!rate.allowed) {
+      return NextResponse.json(rateLimitResponse(rate.retryAfterSeconds), {
+        status: 429,
+        headers: { 'Retry-After': String(rate.retryAfterSeconds) },
+      });
     }
 
     const body = await request.json().catch(() => null);
@@ -55,8 +64,8 @@ export async function POST(request: NextRequest) {
             const revokedCount = await revokeAnyonePermissionFromAsset(account.id, image.id);
             if (revokedCount) results.push({ assetId: image.id, name: image.name, accountEmail: account.email, revokedCount });
           }
-        } catch (error: unknown) {
-          results.push({ assetId: image.id, name: image.name, accountEmail: account.email, error: error instanceof Error ? error.message : 'Unknown Google Drive permission error' });
+        } catch {
+          results.push({ assetId: image.id, name: image.name, accountEmail: account.email, error: 'Unable to inspect this file permission' });
         }
       }
     }
@@ -70,9 +79,9 @@ export async function POST(request: NextRequest) {
       nextCursor: hasMore ? page[page.length - 1]?.id : null,
       ...(action === 'revoke' ? { note: 'Only anyone-type permissions on verified images inside the DriveStack media folder or its direct subfolders are removed. Other permissions are untouched.' } : {}),
     }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
-  } catch (error: unknown) {
+  } catch {
     return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : 'Internal Server Error' },
+      { success: false, error: 'Internal Server Error' },
       { status: 500 }
     );
   }

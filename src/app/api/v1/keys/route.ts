@@ -13,6 +13,14 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
 
+    const rate = checkRateLimit(session.user.id, 'api-key-read', 60, 60_000);
+    if (!rate.allowed) {
+      return NextResponse.json(rateLimitResponse(rate.retryAfterSeconds), {
+        status: 429,
+        headers: { 'Retry-After': String(rate.retryAfterSeconds) },
+      });
+    }
+
     const keys = await db.apiKey.findMany({
       where: { account: { is: { ownerUserId: session.user.id } } },
       orderBy: { createdAt: 'desc' },
@@ -46,9 +54,9 @@ export async function GET(request: NextRequest) {
         },
       }
     );
-  } catch (error: unknown) {
+  } catch {
     return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : 'Internal Server Error' },
+      { success: false, error: 'Internal Server Error' },
       { status: 500 }
     );
   }
@@ -105,9 +113,9 @@ export async function POST(request: NextRequest) {
       },
       { status: 201 }
     );
-  } catch (error: unknown) {
+  } catch {
     return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : 'Internal Server Error' },
+      { success: false, error: 'Internal Server Error' },
       { status: 500 }
     );
   }
@@ -118,6 +126,14 @@ export async function DELETE(request: NextRequest) {
     const session = await getOwnerSession(request.headers);
     if (!session) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const rate = checkRateLimit(session.user.id, 'api-key-delete', 20, 60_000);
+    if (!rate.allowed) {
+      return NextResponse.json(rateLimitResponse(rate.retryAfterSeconds), {
+        status: 429,
+        headers: { 'Retry-After': String(rate.retryAfterSeconds) },
+      });
     }
 
     const { searchParams } = new URL(request.url);
@@ -148,9 +164,9 @@ export async function DELETE(request: NextRequest) {
       success: true,
       message: 'API key revoked successfully',
     });
-  } catch (error: unknown) {
+  } catch {
     return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : 'Internal Server Error' },
+      { success: false, error: 'Internal Server Error' },
       { status: 500 }
     );
   }

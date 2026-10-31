@@ -65,9 +65,9 @@ export async function GET(request: Request) {
       percentage: Math.min(100, percentage),
       percentage_label: percentageLabel,
     });
-  } catch (error: unknown) {
+  } catch {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to fetch storage info' },
+      { error: 'Failed to fetch storage information' },
       { status: 500 }
     );
   }
