@@ -4,6 +4,7 @@ import { verifyUploadedFile, downloadStreamFromDrive } from '@/lib/gdrive';
 import { db } from '@/lib/db';
 import { inspectImageUpload, isAllowedImageMimeType, ImageUploadError } from '@/lib/image-upload';
 import { getPublicAppUrl } from '@/lib/public-url';
+import { checkRateLimit, rateLimitResponse } from '@/lib/rate-limit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -36,6 +37,14 @@ export async function POST(request: NextRequest) {
         { success: false, error: 'Unauthorized: Invalid or revoked API key' },
         { status: 401 }
       );
+    }
+
+    const rate = checkRateLimit(keyRecord.id, 'upload', 10, 60_000);
+    if (!rate.allowed) {
+      return NextResponse.json(rateLimitResponse(rate.retryAfterSeconds), {
+        status: 429,
+        headers: { 'Retry-After': String(rate.retryAfterSeconds) },
+      });
     }
 
     const origin = request.headers.get('origin') || request.headers.get('referer');

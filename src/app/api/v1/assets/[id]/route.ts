@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { deleteFileFromDrive } from '@/lib/gdrive';
 import { getOwnerSession } from '@/lib/auth-guard';
 import { getPublicAppUrl } from '@/lib/public-url';
+import { checkRateLimit, rateLimitResponse } from '@/lib/rate-limit';
 
 export async function GET(
   request: NextRequest,
@@ -12,6 +13,14 @@ export async function GET(
     const session = await getOwnerSession(request.headers);
     if (!session) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const rate = checkRateLimit(session.user.id, 'asset-detail', 120, 60_000);
+    if (!rate.allowed) {
+      return NextResponse.json(rateLimitResponse(rate.retryAfterSeconds), {
+        status: 429,
+        headers: { 'Retry-After': String(rate.retryAfterSeconds) },
+      });
     }
 
     const { id } = await params;

@@ -3,6 +3,7 @@ import type { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { getOwnerSession } from '@/lib/auth-guard';
 import { getPublicAppUrl } from '@/lib/public-url';
+import { checkRateLimit, rateLimitResponse } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,6 +12,14 @@ export async function GET(request: NextRequest) {
     const session = await getOwnerSession(request.headers);
     if (!session) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const rate = checkRateLimit(session.user.id, 'assets-read', 120, 60_000);
+    if (!rate.allowed) {
+      return NextResponse.json(rateLimitResponse(rate.retryAfterSeconds), {
+        status: 429,
+        headers: { 'Retry-After': String(rate.retryAfterSeconds) },
+      });
     }
 
     const { searchParams } = new URL(request.url);
